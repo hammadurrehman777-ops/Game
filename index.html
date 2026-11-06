@@ -1,0 +1,576 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Confusion Quest - Ink Ascension</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+* { box-sizing:border-box; }
+
+body {
+  margin:0;
+  background:#111020;
+  color:white;
+  font-family:'Press Start 2P',monospace;
+  display:flex;
+  justify-content:center;
+  padding:20px 10px;
+}
+
+.game { width:min(950px,100%); }
+
+header {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:12px;
+  margin-bottom:14px;
+}
+
+h1 {
+  color:#f5f35c;
+  font-size:clamp(14px,3vw,23px);
+  line-height:1.7;
+}
+
+.stats {
+  display:flex;
+  gap:16px;
+  font-size:9px;
+  color:#61f6ed;
+}
+
+.canvas-wrap {
+  position:relative;
+  border:5px solid white;
+  box-shadow:0 0 0 5px #ed4cc6, 0 10px 0 #05050c;
+  overflow:hidden;
+  background:#17152e;
+}
+
+canvas {
+  display:block;
+  width:100%;
+  height:auto;
+}
+
+.overlay {
+  position:absolute;
+  inset:0;
+  background:#100e24df;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  align-items:center;
+  text-align:center;
+  padding:20px;
+  gap:18px;
+}
+
+.overlay h2 {
+  font-size:clamp(18px,4vw,29px);
+  color:#f5f35c;
+  line-height:1.8;
+}
+
+.overlay p {
+  font-size:10px;
+  line-height:2.3;
+  max-width:520px;
+}
+
+button {
+  border:3px solid white;
+  background:#f34ac6;
+  color:#171020;
+  font-family:inherit;
+  font-size:11px;
+  padding:16px 20px;
+  cursor:pointer;
+  box-shadow:0 5px #9b2383;
+}
+
+button:active {
+  transform:translateY(4px);
+  box-shadow:none;
+}
+
+#controls {
+  display:flex;
+  justify-content:space-between;
+  flex-wrap:wrap;
+  gap:12px;
+  margin-top:20px;
+  background:#25213e;
+  padding:17px;
+  border:2px solid #555072;
+}
+
+.key {
+  color:#f5f35c;
+  font-size:10px;
+  line-height:2.1;
+}
+
+.key small {
+  color:#aaa5c9;
+  font-size:8px;
+}
+
+.footer {
+  font-size:8px;
+  line-height:2.3;
+  color:#aaa5c9;
+  text-align:center;
+  margin:20px;
+}
+</style>
+</head>
+<body>
+
+<div class="game">
+<header>
+  <h1>CONFUSION QUEST</h1>
+  <div class="stats">
+    <span id="level">LV 01</span>
+    <span id="score">INK 0000</span>
+  </div>
+</header>
+
+<div class="canvas-wrap">
+<canvas id="game" width="900" height="550"></canvas>
+
+<div class="overlay" id="overlay">
+  <h2>INK ASCENSION</h2>
+  <p>
+    WELCOME TO THE CONFUSION ZONE.<br><br>
+    JUMP. DODGE. COLLECT INK.<br>
+    CLIMB YOUR WAY TO THE TOP.
+  </p>
+  <button id="start">START GAME ▶</button>
+  <p>ARROW KEYS + SPACE + SHIFT</p>
+</div>
+</div>
+
+<div id="controls">
+  <div class="key">← →<br><small>MOVE</small></div>
+  <div class="key">SPACE / ↑<br><small>JUMP</small></div>
+  <div class="key">SHIFT<br><small>DODGE / DASH</small></div>
+  <div class="key">R<br><small>RESTART</small></div>
+</div>
+
+<div class="footer">
+  CONFUSION STUDIOS © 1996<br>
+  NO MAP. NO PLAN. JUST INK.
+</div>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const overlay = document.getElementById("overlay");
+
+const W = canvas.width;
+const H = canvas.height;
+
+const colors = ["#ed4cc6","#5bf5e9","#f5f35c","#9c76ff"];
+
+let level = 1;
+let score = 0;
+let running = false;
+let gameOver = false;
+let camera = 0;
+let platforms = [];
+let drops = [];
+let hazards = [];
+let particles = [];
+let keys = {};
+let lastTime = 0;
+let message = "";
+let messageTimer = 0;
+let levelHeight = 1800;
+
+const player = {
+  x:420, y:0, w:42, h:48,
+  vx:0, vy:0,
+  grounded:false,
+  dash:0,
+  dashCooldown:0,
+  facing:1,
+  invincible:0
+};
+
+function makeLevel() {
+  platforms = [];
+  drops = [];
+  hazards = [];
+  particles = [];
+  camera = 0;
+  levelHeight = 1600 + level*250;
+
+  platforms.push({
+    x:330,y:levelHeight-35,w:240,h:25
+  });
+
+  let lastX = 330;
+  let lastY = levelHeight-35;
+
+  for(let i=1;i<17;i++) {
+    let gap = 85 + Math.random()*12;
+    let nextY = lastY-gap;
+    let nextX = Math.max(35,Math.min(680,
+      lastX + (Math.random()-.5)*350));
+
+    platforms.push({
+      x:nextX,y:nextY,
+      w:125+Math.random()*40,
+      h:19
+    });
+
+    if(i%2===0) {
+      drops.push({
+        x:nextX+60,y:nextY-35,
+        taken:false
+      });
+    }
+
+    if(i>2 && i%3===0) {
+      hazards.push({
+        x:nextX+10,y:nextY-65,
+        start:nextX-45,end:nextX+120,
+        dir:1,speed:1.5+level*.3
+      });
+    }
+
+    lastX=nextX;
+    lastY=nextY;
+  }
+
+  platforms.push({
+    x:350,y:lastY-110,w:200,h:22,
+    exit:true
+  });
+
+  player.x=420;
+  player.y=levelHeight-120;
+  player.vx=0;
+  player.vy=0;
+  player.grounded=false;
+  player.dash=0;
+  player.dashCooldown=0;
+  player.invincible=0;
+
+  document.getElementById("level").innerText =
+    "LV "+String(level).padStart(2,"0");
+}
+
+function startGame() {
+  level=1;
+  score=0;
+  gameOver=false;
+  makeLevel();
+  running=true;
+  overlay.style.display="none";
+  updateScore();
+  lastTime=performance.now();
+  requestAnimationFrame(loop);
+}
+
+function updateScore() {
+  document.getElementById("score").innerText =
+    "INK "+String(score).padStart(4,"0");
+}
+
+function jump() {
+  if(!running || gameOver) return;
+  if(player.grounded) {
+    player.vy=-650;
+    player.grounded=false;
+    burst(player.x+20,player.y+45,colors[1],7);
+  }
+}
+
+function dash() {
+  if(!running || gameOver || player.dashCooldown>0) return;
+  player.dash=.19;
+  player.dashCooldown=.9;
+  player.vx=player.facing*650;
+  player.vy=-50;
+  burst(player.x+20,player.y+20,colors[0],12);
+}
+
+window.addEventListener("keydown",e=>{
+  if(["ArrowLeft","ArrowRight","ArrowUp","Space"].includes(e.code))
+    e.preventDefault();
+
+  if(keys[e.code]) return;
+  keys[e.code]=true;
+
+  if(e.code==="Space" || e.code==="ArrowUp" || e.code==="KeyW")
+    jump();
+
+  if(e.code==="ShiftLeft" || e.code==="ShiftRight")
+    dash();
+
+  if(e.code==="KeyR") {
+    if(!running || gameOver) startGame();
+    else {
+      makeLevel();
+    }
+  }
+});
+
+window.addEventListener("keyup",e=>{
+  keys[e.code]=false;
+});
+
+function burst(x,y,color,count) {
+  for(let i=0;i<count;i++) {
+    particles.push({
+      x,y,
+      vx:(Math.random()-.5)*300,
+      vy:(Math.random()-.5)*300,
+      life:.6,
+      color
+    });
+  }
+}
+
+function fail() {
+  if(!running || player.invincible>0) return;
+  gameOver=true;
+  running=false;
+  overlay.style.display="flex";
+  overlay.innerHTML=`
+    <h2>OOPS!</h2>
+    <p>THE CONFUSED ONE HAS FALLEN.<br><br>
+    INK COLLECTED: ${score}<br>
+    LEVEL REACHED: ${level}</p>
+    <button onclick="startGame()">TRY AGAIN ↻</button>
+  `;
+}
+
+function update(dt) {
+  if(!running) return;
+
+  const oldY=player.y;
+
+  player.dash=Math.max(0,player.dash-dt);
+  player.dashCooldown=Math.max(0,player.dashCooldown-dt);
+  player.invincible=Math.max(0,player.invincible-dt);
+
+  if(player.dash<=0) {
+    let direction=0;
+    if(keys.ArrowLeft || keys.KeyA) direction--;
+    if(keys.ArrowRight || keys.KeyD) direction++;
+
+    if(direction) {
+      player.facing=direction;
+      player.vx=direction*320;
+    } else {
+      player.vx*=Math.pow(.001,dt);
+    }
+  }
+
+  player.x+=player.vx*dt;
+  player.vy+=1700*dt;
+  player.y+=player.vy*dt;
+
+  player.x=Math.max(0,Math.min(W-player.w,player.x));
+
+  player.grounded=false;
+
+  if(player.vy>=0) {
+    for(const p of platforms) {
+      if(oldY+player.h<=p.y+4 &&
+         player.y+player.h>=p.y &&
+         player.x+player.w>p.x &&
+         player.x<p.x+p.w) {
+
+        player.y=p.y-player.h;
+        player.vy=0;
+        player.grounded=true;
+
+        if(p.exit) {
+          level++;
+          score+=500;
+          updateScore();
+          makeLevel();
+          message="LEVEL "+level+" UNLOCKED!";
+          messageTimer=2;
+          break;
+        }
+      }
+    }
+  }
+
+  for(const d of drops) {
+    if(!d.taken &&
+       Math.abs(player.x+21-d.x)<30 &&
+       Math.abs(player.y+24-d.y)<30) {
+      d.taken=true;
+      score+=100;
+      updateScore();
+      burst(d.x,d.y,colors[2],15);
+    }
+  }
+
+  for(const h of hazards) {
+    h.x+=h.dir*h.speed*60*dt;
+    if(h.x<h.start || h.x>h.end) h.dir*=-1;
+
+    if(player.invincible<=0 &&
+       player.x+player.w-7>h.x &&
+       player.x+7<h.x+30 &&
+       player.y+player.h-5>h.y &&
+       player.y+5<h.y+30) {
+      fail();
+    }
+  }
+
+  camera=Math.max(0,Math.min(
+    levelHeight-H+100,
+    player.y-H*.58
+  ));
+
+  if(player.y>levelHeight+200) fail();
+
+  for(const p of particles) {
+    p.x+=p.vx*dt;
+    p.y+=p.vy*dt;
+    p.life-=dt;
+  }
+  particles=particles.filter(p=>p.life>0);
+
+  messageTimer=Math.max(0,messageTimer-dt);
+}
+
+function draw() {
+  ctx.clearRect(0,0,W,H);
+
+  let gradient=ctx.createLinearGradient(0,0,0,H);
+  gradient.addColorStop(0,"#15152f");
+  gradient.addColorStop(1,"#292044");
+  ctx.fillStyle=gradient;
+  ctx.fillRect(0,0,W,H);
+
+  // Background stars
+  for(let i=0;i<70;i++) {
+    let x=(i*137)%W;
+    let y=((i*89-camera*.25)%(H+100)+H+100)%(H+100);
+    ctx.fillStyle=i%2?"#6b638d":"#f5f35c";
+    ctx.fillRect(x,y,3,3);
+  }
+
+  // Background level markings
+  ctx.fillStyle="#ffffff18";
+  ctx.font="12px monospace";
+  for(let i=0;i<12;i++) {
+    ctx.fillText("INK ZONE // "+level,20,40+i*65);
+  }
+
+  // Platforms
+  for(const p of platforms) {
+    let y=p.y-camera;
+    if(y < -50 || y > H+50) continue;
+
+    ctx.fillStyle=p.exit?"#f5f35c":"#ed4cc6";
+    ctx.fillRect(p.x,y,p.w,p.h);
+
+    ctx.fillStyle="#5bf5e9";
+    ctx.fillRect(p.x,y,p.w,5);
+
+    ctx.fillStyle="#171020";
+    for(let i=8;i<p.w-8;i+=24)
+      ctx.fillRect(p.x+i,y+9,9,5);
+
+    if(p.exit) {
+      ctx.fillStyle="white";
+      ctx.font="12px monospace";
+      ctx.fillText("EXIT ↑",p.x+62,y-14);
+    }
+  }
+
+  // Ink drops
+  for(const d of drops) {
+    if(d.taken) continue;
+    let y=d.y-camera;
+    ctx.fillStyle="#f5f35c";
+    ctx.beginPath();
+    ctx.arc(d.x,y,10,0,Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle="#fff";
+    ctx.fillRect(d.x-2,y-4,4,8);
+  }
+
+  // Hazards
+  for(const h of hazards) {
+    let y=h.y-camera;
+    ctx.fillStyle="#ff563f";
+    ctx.beginPath();
+    ctx.arc(h.x+15,y+15,15,0,Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle="#171020";
+    ctx.fillRect(h.x+8,y+9,4,4);
+    ctx.fillRect(h.x+19,y+9,4,4);
+  }
+
+  // Player trail
+  if(player.dash>0) {
+    ctx.globalAlpha=.4;
+    ctx.fillStyle="#5bf5e9";
+    ctx.fillRect(player.x-player.facing*35,
+      player.y-camera+10,35,30);
+    ctx.globalAlpha=1;
+  }
+
+  // Confused protagonist
+  ctx.font="43px serif";
+  ctx.textAlign="center";
+  ctx.fillText("🫨",player.x+21,player.y-camera+39);
+
+  // Particles
+  for(const p of particles) {
+    ctx.globalAlpha=Math.max(0,p.life);
+    ctx.fillStyle=p.color;
+    ctx.fillRect(p.x,p.y-camera,7,7);
+  }
+  ctx.globalAlpha=1;
+
+  // HUD
+  ctx.textAlign="left";
+  ctx.fillStyle="#f5f35c";
+  ctx.font="12px monospace";
+  ctx.fillText("INK ASCENSION // STAGE "+level,18,24);
+
+  ctx.fillStyle="white";
+  ctx.font="10px monospace";
+  ctx.fillText("DASH: "+(player.dashCooldown<=0?"READY":"RECHARGING"),18,43);
+
+  if(messageTimer>0) {
+    ctx.textAlign="center";
+    ctx.fillStyle="#f5f35c";
+    ctx.font="bold 25px monospace";
+    ctx.fillText(message,W/2,95);
+  }
+}
+
+function loop(time) {
+  if(!running) return;
+  const dt=Math.min((time-lastTime)/1000,.035);
+  lastTime=time;
+  update(dt);
+  draw();
+  if(running) requestAnimationFrame(loop);
+}
+
+document.getElementById("start").addEventListener("click",startGame);
+
+draw();
+</script>
+</body>
+</html>
